@@ -242,23 +242,30 @@ public class DDGPSProcessor : NSObject, DDBLEInterfaceDelegate, CLLocationManage
                     if (checksumBytes[0] == runningCheckSum_A && checksumBytes[1] == runningCheckSum_B) {
                         //Checksum OK.
                         let packetData: Data = Data(packetBytes)
-                        
+
                         switch (classId) {
                         case DDUBX_Constants.NAV.classID:
                             switch (messageId) {
                             case DDUBX_Constants.NAV.SAT.messageID:
-                                let ubxMessage: DDUBX_NAV_SAT = DDUBX_NAV_SAT()
-                                ubxMessage.parseFrom(data: packetData)
-                            
-                                print(ubxMessage.description)
+                                if packetData.count >= 6 {
+                                    let ubxMessage: DDUBX_NAV_SAT = DDUBX_NAV_SAT()
+                                    ubxMessage.parseFrom(data: packetData)
+                                    print(ubxMessage.description)
+                                } else {
+                                    logger.warning("Truncated NAV-SAT packet (\(packetData.count) bytes)")
+                                }
                             case DDUBX_Constants.NAV.POSLLH.messageID:
-                                let ubxMessage: DDUBX_NAV_POSLLH = DDUBX_NAV_POSLLH()
-                                ubxMessage.parseFrom(data: packetData)
-                            
-                                self._setState(state: ubxMessage.gpsState)
-                            
-                                self.delegates.invoke {
-                                    $0.processedPOSLLH(message: ubxMessage)
+                                if packetData.count >= 28 {
+                                    let ubxMessage: DDUBX_NAV_POSLLH = DDUBX_NAV_POSLLH()
+                                    ubxMessage.parseFrom(data: packetData)
+
+                                    self._setState(state: ubxMessage.gpsState)
+
+                                    self.delegates.invoke {
+                                        $0.processedPOSLLH(message: ubxMessage)
+                                    }
+                                } else {
+                                    logger.warning("Truncated NAV-POSLLH packet (\(packetData.count) bytes)")
                                 }
                             default:
                                 logger.warning("Got a ubx message id we don't understand: clsID: \(String(format:"0x%02X", classId)), msgID: \(String(format:"0x%02X", messageId))")
@@ -268,12 +275,12 @@ public class DDGPSProcessor : NSObject, DDBLEInterfaceDelegate, CLLocationManage
                             case DDUBX_Constants.ACK.NAK.messageID:
                                 let ubxMessage: UBX_ACK_NAK = UBX_ACK_NAK()
                                 ubxMessage.parseFrom(data: packetData)
-                            
+
                                 print(ubxMessage.description)
                             case DDUBX_Constants.ACK.ACK.messageID:
                                 let ubxMessage: UBX_ACK_ACK = UBX_ACK_ACK()
                                 ubxMessage.parseFrom(data: packetData)
-                            
+
                                 print(ubxMessage.description)
                             default:
                                 logger.warning("Got a ubx message id we don't understand: clsID: \(String(format:"0x%02X", classId)), msgID: \(String(format:"0x%02X", messageId))")
@@ -281,22 +288,22 @@ public class DDGPSProcessor : NSObject, DDBLEInterfaceDelegate, CLLocationManage
                         default:
                            logger.warning("Got a ubx class id we don't understand: clsID: \(String(format:"0x%02X", classId))")
                         }
-                        
-                        
+
+
                         //Back to the start we go
                         processState = 0
-                        
+
                     } else {
-                        
+
                         logger.debug("Bad Checksum")
                         //Checksum Bad.  Un-wind all the bytes back into the queue incase we dropped a byte so we don't miss another message
                         _byteQueue.insert(val: checksumBytes[1], at: 0)
                         _byteQueue.insert(val: checksumBytes[0], at: 0)
-                        
-                        for i in (0...(packetBytes.count-1)).reversed() {
+
+                        for i in (0..<packetBytes.count).reversed() {
                             _byteQueue.insert(val: packetBytes[i], at: 0)
                         }
-                        
+
                         //Back to the start we go
                         processState = 0
                         continue
