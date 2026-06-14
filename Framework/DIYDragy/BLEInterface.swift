@@ -167,9 +167,7 @@ public final class DDBLEDevice : NSObject, CBCentralManagerDelegate, CBPeriphera
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         //When error is set it was most likley some kinda connection error.  If its nil it was because we asked to disconnect
         if (error != nil) {
-            
-            self._setState(state: DDBLEDeviceState.connected)
-            
+            self._setState(state: DDBLEDeviceState.error)
             self.disconnect()
         }
     }
@@ -238,24 +236,26 @@ public final class DDBLEDevice : NSObject, CBCentralManagerDelegate, CBPeriphera
     
     public func send(data: Data) {
 #if !targetEnvironment(simulator)
-        let maxWriteSize: Int = self.peripheral.maximumWriteValueLength(for: CBCharacteristicWriteType.withoutResponse)
-        //print(maxWriteSize)
-        
-        var dataPos: Int = 0
-        var dataLeft: Int = data.count
-        
-        while (dataLeft > 0) {
-            
-            let bufferSize: Int = min(dataLeft, maxWriteSize)
-            //print("send loop \(bufferSize)")
-            
-            let lowerBounds: Int = dataPos
-            let upperBounds: Int = dataPos + bufferSize-1
-            
-            peripheral.writeValue(data.subdata(in: lowerBounds...upperBounds), for: self.rxdCharacteristic!, type: CBCharacteristicWriteType.withoutResponse)
-            
+        guard let peripheral = self.peripheral,
+              let rxdCharacteristic = self.rxdCharacteristic,
+              peripheral.state == .connected,
+              !data.isEmpty else {
+            return
+        }
+
+        // maximumWriteValueLength can return 0 before MTU negotiation completes;
+        // fall back to the BLE default ATT MTU (23 - 3 = 20 payload bytes).
+        var maxWriteSize = peripheral.maximumWriteValueLength(for: .withoutResponse)
+        if maxWriteSize <= 0 {
+            maxWriteSize = 20
+        }
+
+        var dataPos = 0
+        while dataPos < data.count {
+            let bufferSize = min(data.count - dataPos, maxWriteSize)
+            let chunk = data.subdata(in: dataPos..<(dataPos + bufferSize))
+            peripheral.writeValue(chunk, for: rxdCharacteristic, type: .withoutResponse)
             dataPos += bufferSize
-            dataLeft -= bufferSize
         }
 #endif
     }
